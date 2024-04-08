@@ -73,6 +73,13 @@ def parse_args():
         'Where to store the data-related files such as shuffle index. This needs to be on a local storage of a node (not on a shared storage)'
     )
     parser.add_argument(
+        '--save_interval',
+        type=int,
+        default=100,
+        help=
+        'Model checkpointing interval'
+    )
+    parser.add_argument(
         "--unsupervised_dataset_name",
         type=str,
         default=None,
@@ -368,6 +375,12 @@ def parse_args():
         help=
         "Training non-overflow step at which to terminate training during testing."
     )
+    parser.add_argument(
+        "--resume_checkpoint",
+        action='store_true',
+        help=
+        "Resume training from stored checkpoint."
+    )
 
     parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
@@ -498,6 +511,15 @@ def main():
     unsup_mini_dataset = MiniDataset(args.generation_batches,
                                      args.per_device_training_batch_size)
 
+    start_epoch = 0
+    # Check if there is a checkpoint to resume from
+    if args.resume_checkpoint:
+        checkpoint = torch.load(args.resume_checkpoint, map_location=device)
+        rlhf_engine.load_state_dict(checkpoint['rlhf_engine_state_dict'])
+        trainer.load_state_dict(checkpoint['trainer_state_dict'])
+        start_epoch = checkpoint['epoch'] + 1
+        print("Checkpoint loaded successfully!")
+
     # Train!
     print_rank_0(
         f"***** Running training (total_iters={num_total_iters}) *****",
@@ -507,7 +529,7 @@ def main():
     step_average_reward = 0.
     ema_reward_score = ExponentialMovingAverage()
 
-    for epoch in range(args.num_train_epochs):
+    for epoch in range(start_epoch, args.num_train_epochs):
         print_rank_0(
             f"Beginning of Epoch {epoch+1}/{args.num_train_epochs}, Total Generation Batches {min(len(prompt_train_dataloader), len(unsupervised_train_dataloader))}",
             args.global_rank)
@@ -567,6 +589,11 @@ def main():
                     random.shuffle(unsup_dataset)
 
                 end = time.time()
+                #### I added
+                if (step + 1) % args.save_interval == 0:
+                    checkpoint_path = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch}_step_{step + 1}.pt')
+                    save_checkpoint(checkpoint_path, rlhf_engine, trainer, epoch, step)
+                    print(f"Checkpoint saved at {checkpoint_path}")
                 training_time = end - training_start
                 e2e_time = training_time + trainer.generate_time * args.generation_batches  # it is an approximation, we did not include, e.g., rw forward time etc
 
@@ -665,6 +692,15 @@ def main():
                                   save_dir=os.path.join(
                                       args.output_dir, 'critic'),
                                   zero_stage=args.critic_zero_stage)
+          
+    def save_checkpoint(checkpoint_path, rlhf_engine, trainer, epoch, step):
+        torch.save({
+            'epoch': epoch,
+            'step': step,
+            'rlhf_engine_state_dict': rlhf_engine.state_dict(),
+            'trainer_state_dict': trainer.state_dict(),
+        }, checkpoint_path)
+      
 
 
 if __name__ == "__main__":
