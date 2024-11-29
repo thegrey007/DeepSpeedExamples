@@ -167,7 +167,7 @@ class RewardModel(nn.Module):
                 # here we only use the answer part of the sequence so we do not need to care about the padding at the beginning
                 c_ind = c_inds[0].item() + prompt_length if len(
                     c_inds) > 0 else seq_len
-                chosen_end_scores.append(value[c_ind - 1])
+                chosen_end_scores.append(value[c_ind - 1]) ## gives score at last token after answer, like [prompt answer _ ]
             return {
                 "values": values,
                 "chosen_end_scores": torch.stack(chosen_end_scores),

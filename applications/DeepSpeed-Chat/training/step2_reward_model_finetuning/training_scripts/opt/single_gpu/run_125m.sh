@@ -13,8 +13,8 @@ if [ "$ZERO_STAGE" == "" ]; then
 fi
 mkdir -p $OUTPUT
 
-deepspeed --num_gpus 1 main.py --model_name_or_path facebook/opt-125m \
-   --num_padding_at_beginning 1 --weight_decay 0.1 --dropout 0.0 --gradient_accumulation_steps 4 --zero_stage $ZERO_STAGE \
+deepspeed --num_gpus 1 main.py --model_name_or_path "thegrey007/opt-125m-finetuned" --data_path "thegrey007/factual"\
+   --num_padding_at_beginning 1 --weight_decay 0.1 --dropout 0.0 --gradient_accumulation_steps 4 --zero_stage $ZERO_STAGE --per_device_train_batch_size 24 --per_device_eval_batch_size 24\
    --enable_tensorboard \
    --tensorboard_path $OUTPUT \
    --deepspeed --output_dir $OUTPUT &> $OUTPUT/training.log

@@ -417,7 +417,6 @@ def save_checkpoint(checkpoint_path, rlhf_engine, trainer, epoch, step, args):
     # save_dict_actor = rlhf_engine.actor.state_dict()
     # save_dict_cr = rlhf_engine.critic.state_dict()
     print_rank_0('saving model ...')
-    timepass_modulus = (step + 1)%2
     torch.save({
         'epoch': epoch,
         'step': step,
@@ -425,7 +424,7 @@ def save_checkpoint(checkpoint_path, rlhf_engine, trainer, epoch, step, args):
         'rlhf_engine_critic_state_dict': rlhf_engine.critic.state_dict(),
         'rlhf_engine_ref_state_dict': rlhf_engine.ref.state_dict(),
         'rlhf_engine_reward_state_dict': rlhf_engine.reward.state_dict()
-    }, os.path.join(checkpoint_path, f'checkpoint_epoch_{epoch}_step_{timepass_modulus}.pt'))
+    }, os.path.join(checkpoint_path, f'checkpoint_epoch_{epoch}_step_{step + 1}.pt'))
 
 
 def create_datasets(args, tokenizer, train_phase=3):

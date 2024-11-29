@@ -23,6 +23,12 @@ def get_raw_dataset(dataset_name, output_path, seed, local_rank):
     if "Dahoas/rm-static" in dataset_name:
         return raw_datasets.DahoasRmstaticDataset(output_path, seed,
                                                   local_rank, dataset_name)
+    elif "thegrey007/factual" in dataset_name:
+        return raw_datasets.GreyFactualDataset(output_path, seed,
+                                                  local_rank, dataset_name)
+    elif "thegrey007/generative" in dataset_name:
+        return raw_datasets.GreyGenDataset(output_path, seed,
+                                                  local_rank, dataset_name)
     elif "Dahoas/full-hh-rlhf" in dataset_name:
         return raw_datasets.DahoasFullhhrlhfDataset(output_path, seed,
                                                     local_rank, dataset_name)
@@ -244,6 +250,7 @@ def create_dataset(local_rank, dataset_name, data_split, output_path,
                    max_seq_len, rebuild):
     raw_dataset = get_raw_dataset(dataset_name, output_path, seed, local_rank)
     train_dataset = raw_dataset.get_train_data()
+    # print(train_dataset.shape)
     train_index = get_raw_dataset_split_index(local_rank, output_path,
                                               raw_dataset.dataset_name_clean,
                                               seed, "train", data_split,

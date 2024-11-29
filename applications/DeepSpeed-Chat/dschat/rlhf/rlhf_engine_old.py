@@ -1,8 +1,6 @@
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: Apache-2.0
 
-## Modified by Shreya to add Factual and Generative reward models
-
 # DeepSpeed Team
 import time
 import torch
@@ -41,7 +39,7 @@ def log_init(model_name, stime=None):
 
 class DeepSpeedRLHFEngine():
 
-    def __init__(self, actor_model_name_or_path, fact_critic_model_name_or_path, gen_critic_model_name_or_path, 
+    def __init__(self, actor_model_name_or_path, critic_model_name_or_path,
                  tokenizer, args, num_total_iters):
         self.args = args
         self.num_total_iters = num_total_iters
@@ -55,18 +53,12 @@ class DeepSpeedRLHFEngine():
         if self.args.enable_ema:
             self.actor_ema = self._init_ema(
                 actor_model_name_or_path=actor_model_name_or_path)
-        self.critic_fact, self.critic_gen = self._init_critic(
-            fact_critic_model_name_or_path=fact_critic_model_name_or_path, gen_critic_model_name_or_path=gen_critic_model_name_or_path)
-        # self.critic_gen = self._init_critic(
-            
-        self.reward_fact, self.reward_gen = self._init_reward(
-            fact_critic_model_name_or_path=fact_critic_model_name_or_path, gen_critic_model_name_or_path=gen_critic_model_name_or_path)
-        # self.reward_gen = self._init_reward(
-            
+        self.critic = self._init_critic(
+            critic_model_name_or_path=critic_model_name_or_path)
+        self.reward = self._init_reward(
+            critic_model_name_or_path=critic_model_name_or_path)
         if self.args.critic_gradient_checkpointing:
-            self.critic_fact.gradient_checkpointing_enable()
-            self.critic_gen.gradient_checkpointing_enable()
-            
+            self.critic.gradient_checkpointing_enable()
 
     def _init_actor(self, actor_model_name_or_path):
         stime = log_init("Actor")
@@ -196,7 +188,7 @@ class DeepSpeedRLHFEngine():
         log_init("EMA", stime=stime)
         return ema_engine
 
-    def _init_critic(self, fact_critic_model_name_or_path, gen_critic_model_name_or_path):
+    def _init_critic(self, critic_model_name_or_path):
         stime = log_init("Critic")
         ds_config = get_train_ds_config(
             offload=self.args.offload,
@@ -223,17 +215,8 @@ class DeepSpeedRLHFEngine():
             ) * self.args.gradient_accumulation_steps
 
         # Model
-        fact_critic_model = create_critic_model(
-            model_name_or_path=fact_critic_model_name_or_path,
-            tokenizer=self.tokenizer,
-            ds_config=ds_eval_config,
-            num_padding_at_beginning=self.args.num_padding_at_beginning,
-            rlhf_training=True,
-            dropout=self.args.critic_dropout,
-            zero_stage=self.args.critic_zero_stage)
-        
-        gen_critic_model = create_critic_model(
-            model_name_or_path=gen_critic_model_name_or_path,
+        critic_model = create_critic_model(
+            model_name_or_path=critic_model_name_or_path,
             tokenizer=self.tokenizer,
             ds_config=ds_eval_config,
             num_padding_at_beginning=self.args.num_padding_at_beginning,
@@ -243,67 +226,41 @@ class DeepSpeedRLHFEngine():
 
         # LoRA
         if self.args.critic_lora_dim > 0:
-            fact_critic_model = convert_linear_layer_to_lora(
-                fact_critic_model, self.args.critic_lora_module_name,
+            critic_model = convert_linear_layer_to_lora(
+                critic_model, self.args.critic_lora_module_name,
                 self.args.critic_lora_dim)
             if self.args.only_optimize_lora:
-                fact_critic_model = only_optimize_lora_parameters(fact_critic_model)
-                fact_critic_model = make_model_gradient_checkpointing_compatible(
-                    fact_critic_model)
-                
-            gen_critic_model = convert_linear_layer_to_lora(
-                gen_critic_model, self.args.critic_lora_module_name,
-                self.args.critic_lora_dim)
-            if self.args.only_optimize_lora:
-                gen_critic_model = only_optimize_lora_parameters(gen_critic_model)
-                gen_critic_model = make_model_gradient_checkpointing_compatible(
-                    gen_critic_model)
+                critic_model = only_optimize_lora_parameters(critic_model)
+                critic_model = make_model_gradient_checkpointing_compatible(
+                    critic_model)
 
         # Optimizer
         AdamOptimizer = DeepSpeedCPUAdam if self.args.offload else FusedAdam
-        fact_optim_params = get_optimizer_grouped_parameters(
-            fact_critic_model, self.args.critic_weight_decay,
+        optim_params = get_optimizer_grouped_parameters(
+            critic_model, self.args.critic_weight_decay,
             self.args.critic_lora_learning_rate)
-        gen_optim_params = get_optimizer_grouped_parameters(
-            gen_critic_model, self.args.critic_weight_decay,
-            self.args.critic_lora_learning_rate)
-        fact_optim = AdamOptimizer(fact_optim_params,
-                              lr=self.args.critic_learning_rate,
-                              betas=(0.9, 0.95))
-        gen_optim = AdamOptimizer(gen_optim_params,
+        optim = AdamOptimizer(optim_params,
                               lr=self.args.critic_learning_rate,
                               betas=(0.9, 0.95))
 
         # LR Scheduler
-        fact_lr_scheduler = get_scheduler(
+        lr_scheduler = get_scheduler(
             name=self.args.lr_scheduler_type,
-            optimizer=fact_optim,
-            num_warmup_steps=self.args.num_warmup_steps,
-            num_training_steps=self.num_total_iters,
-        )
-
-        gen_lr_scheduler = get_scheduler(
-            name=self.args.lr_scheduler_type,
-            optimizer=gen_optim,
+            optimizer=optim,
             num_warmup_steps=self.args.num_warmup_steps,
             num_training_steps=self.num_total_iters,
         )
 
         # DeepSpeed Engine
-        fact_critic_engine, *_ = deepspeed.initialize(model=fact_critic_model,
-                                                 optimizer=fact_optim,
-                                                 lr_scheduler=fact_lr_scheduler,
-                                                 config=ds_config)
-        
-        gen_critic_engine, *_ = deepspeed.initialize(model=gen_critic_model,
-                                                 optimizer=gen_optim,
-                                                 lr_scheduler=gen_lr_scheduler,
+        critic_engine, *_ = deepspeed.initialize(model=critic_model,
+                                                 optimizer=optim,
+                                                 lr_scheduler=lr_scheduler,
                                                  config=ds_config)
 
         log_init("Critic", stime=stime)
-        return fact_critic_engine, gen_critic_engine
+        return critic_engine
 
-    def _init_reward(self, fact_critic_model_name_or_path, gen_critic_model_name_or_path):
+    def _init_reward(self, critic_model_name_or_path):
         stime = log_init("Reward")
         # DS Config
         zero_stage = self.args.critic_zero_stage
@@ -332,17 +289,8 @@ class DeepSpeedRLHFEngine():
             ) * self.args.gradient_accumulation_steps
 
         # Model
-        fact_reward_model = create_critic_model(
-            model_name_or_path=fact_critic_model_name_or_path,
-            tokenizer=self.tokenizer,
-            ds_config=ds_eval_config,
-            num_padding_at_beginning=self.args.num_padding_at_beginning,
-            rlhf_training=True,
-            dropout=self.args.critic_dropout,
-            zero_stage=zero_stage)
-        
-        gen_reward_model = create_critic_model(
-            model_name_or_path=gen_critic_model_name_or_path,
+        reward_model = create_critic_model(
+            model_name_or_path=critic_model_name_or_path,
             tokenizer=self.tokenizer,
             ds_config=ds_eval_config,
             num_padding_at_beginning=self.args.num_padding_at_beginning,
@@ -350,11 +298,8 @@ class DeepSpeedRLHFEngine():
             dropout=self.args.critic_dropout,
             zero_stage=zero_stage)
 
-        fact_reward_engine, *_ = deepspeed.initialize(model=fact_reward_model,
-                                                 config=ds_config)
-        
-        gen_reward_engine, *_ = deepspeed.initialize(model=gen_reward_model,
+        reward_engine, *_ = deepspeed.initialize(model=reward_model,
                                                  config=ds_config)
 
         log_init("Reward", stime=stime)
-        return fact_reward_engine, gen_reward_engine
+        return reward_engine

@@ -58,11 +58,10 @@ def get_generator(path):
     return generator
 
 
-def get_user_input(user_input):
-    tmp = input("Enter input (type 'quit' to exit, 'clear' to clean memory): ")
-    new_inputs = f"Human: {tmp}\n Assistant: "
-    user_input += f" {new_inputs}"
-    return user_input, tmp == "quit", tmp == "clear"
+def get_user_input(i, test_qs, test_ans):
+    user_input = test_qs[i]
+    answer = test_ans[i]
+    return user_input, False, False, answer
 
 
 def get_model_response(generator, user_input, max_new_tokens):
@@ -86,12 +85,10 @@ def main(args):
     generator = get_generator(args.path)
     set_seed(42)
 
-    user_input = ""
-    num_rounds = 0
-    while True:
-        num_rounds += 1
-        user_input, quit, clear = get_user_input(user_input)
-
+    for i in range(len(test_answer)):
+        user_input = ""
+        num_rounds = 0
+        user_input, quit, clear, answer = get_user_input(user_input)
         if quit:
             break
         if clear:
@@ -99,13 +96,16 @@ def main(args):
             continue
 
         response = get_model_response(generator, user_input,
-                                      args.max_new_tokens)
-        output = process_response(response, num_rounds)
+                                    args.max_new_tokens)
+        output = process_response(response, 1)
 
-        print("-" * 30 + f" Round {num_rounds} " + "-" * 30)
-        print(f"{output}")
-        
-        user_input = f"{output}\n\n"
+        # print("-" * 30 + f" Round {num_rounds} " + "-" * 30)
+        # print(f"{output}")
+        with open('llm_chats.txt', 'a') as file:
+            file.write(f"{output}" + "\n")
+        with open('real_chats.txt', 'a') as file2:
+            file2.write(user_input + answer + "\n")
+        # user_input = f"{output}\n\n"
 
 
 if __name__ == "__main__":
