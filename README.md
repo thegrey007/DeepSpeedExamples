@@ -1,3 +1,7 @@
+# FactGenRLHF (forked from DeepSpeedExamples)
+
+This repository contains code for Shreya .S. Ramanujam's UGRC on RLHF for LLMs. We propose a new reward signal involving the use of BART for weighing the Factual and Generative rewards. Experiments show significant improvement over standard PPO RLHF in 7 out of 10 Perspective API attributes, proving our algorithm's efficacy.
+
 # DeepSpeed Examples
 This repository contains various examples including training, inference, compression, benchmarks, and applications that use [DeepSpeed](https://github.com/microsoft/DeepSpeed).
 
